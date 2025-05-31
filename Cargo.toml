@@ -1,5 +1,5 @@
 [package]
-name = "vault_project"
+name = "vault"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,3 +13,4 @@ rpassword = "7.0"         # for password prompt without echo
 sha2 = "0.10"             # for hashing keys (file key derivation)
 clap = { version = "4", features = ["derive"] }  # CLI arg parsing
 chrono = "0.4"            # timestamping logs
+anyhow = "1.0.98"
