@@ -1,84 +1,41 @@
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, Nonce,
-};
-use argon2::{Argon2, PasswordHasher};
+use aes::Aes256;
+use ctr::cipher::{KeyIvInit, StreamCipher};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-/// Generate a random 16-byte salt
-pub fn generate_salt() -> [u8; 16] {
-    let mut salt = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut salt);
-    salt
-}
+pub type AesCtr = ctr::Ctr64BE<Aes256>;
 
-/// Derive 32-byte master key from password and salt using Argon2id
-pub fn derive_key_from_password(password: &str, salt: &[u8; 16]) -> [u8; 32] {
-    let argon2 = Argon2::default();
-
-    let password_bytes = password.as_bytes();
+/// Derives a 256-bit AES key from vault password, file password, and creation time.
+/// All inputs are strings.
+pub fn derive_key(vault_pw: &str, file_pw: &str, creation_time: &str) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(vault_pw.as_bytes());
+    hasher.update(file_pw.as_bytes());
+    hasher.update(creation_time.as_bytes());
+    let result = hasher.finalize();
     let mut key = [0u8; 32];
-
-    // Argon2 password hash output as raw bytes (not encoded)
-    // Use password hash as key material by hashing the password with salt
-    // We can do this by password hashing and then extracting bytes, but argon2 crate returns PasswordHash struct
-
-    // Instead, we use low-level function to fill key directly (recommended for key derivation)
-
-    use argon2::password_hash::{PasswordHasher as _, SaltString};
-    let salt_str = SaltString::b64_encode(salt).expect("Failed to encode salt");
-
-    let mut output = vec![0u8; 32];
-    argon2
-        .hash_password_into(password_bytes, salt_str.as_ref(), &mut output)
-        .expect("Key derivation failed");
-
-    key.copy_from_slice(&output);
+    key.copy_from_slice(&result);
     key
 }
 
-/// Derive per-file key from master key + filename (SHA256(master_key || filename))
-pub fn derive_file_key(master_key: &[u8; 32], filename: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(master_key);
-    hasher.update(filename.as_bytes());
-    let result = hasher.finalize();
-    let mut file_key = [0u8; 32];
-    file_key.copy_from_slice(&result);
-    file_key
+/// Encrypts data with AES-CTR using derived key.
+/// Returns a tuple of (nonce, ciphertext).
+pub fn encrypt(data: &[u8], key: &[u8; 32]) -> (Vec<u8>, Vec<u8>) {
+    let mut nonce = [0u8; 8];
+    rand::thread_rng().fill_bytes(&mut nonce);
+
+    let mut cipher = AesCtr::new(key.into(), &nonce.into());
+    let mut buffer = data.to_vec();
+    cipher.apply_keystream(&mut buffer);
+
+    (nonce.to_vec(), buffer)
 }
 
-/// Encrypt plaintext with key using AES-256-GCM
-/// Returns nonce + ciphertext concatenated
-pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, aes_gcm::Error> {
-    let cipher = Aes256Gcm::new(key.into());
-
-    // 12-byte random nonce
-    let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    let ciphertext = cipher.encrypt(nonce, plaintext)?;
-
-    // Return nonce || ciphertext
-    let mut output = Vec::with_capacity(12 + ciphertext.len());
-    output.extend_from_slice(&nonce_bytes);
-    output.extend_from_slice(&ciphertext);
-
-    Ok(output)
-}
-
-/// Decrypt ciphertext with key using AES-256-GCM
-/// Expects nonce (12 bytes) prepended to ciphertext
-pub fn decrypt(key: &[u8; 32], ciphertext: &[u8]) -> Result<Vec<u8>, aes_gcm::Error> {
-    if ciphertext.len() < 12 {
-        return Err(aes_gcm::Error);
-    }
-    let cipher = Aes256Gcm::new(key.into());
-
-    let (nonce_bytes, ciphertext) = ciphertext.split_at(12);
-    let nonce = Nonce::from_slice(nonce_bytes);
-
-    cipher.decrypt(nonce, ciphertext)
+/// Decrypts data with AES-CTR using key and nonce.
+/// Returns the plaintext.
+pub fn decrypt(ciphertext: &[u8], key: &[u8; 32], nonce: &[u8]) -> Vec<u8> {
+    let mut cipher = AesCtr::new(key.into(), nonce.into());
+    let mut buffer = ciphertext.to_vec();
+    cipher.apply_keystream(&mut buffer);
+    buffer
 }

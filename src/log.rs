@@ -1,31 +1,28 @@
+use std::fs::{OpenOptions, read_to_string};
+use std::io::{self, Write};
+use std::path::Path;
 use chrono::Utc;
-use serde::{Serialize, Deserialize};
-use std::fs::OpenOptions;
-use std::io::Write;
 
-#[derive(Serialize, Deserialize)]
-pub struct LogEntry {
-    pub timestamp: String,
-    pub action: String,
-    pub file: String,
-    pub vault_file: Option<String>,
-}
-
-pub fn log_action(action: &str, file: &str, vault_file: Option<&str>) {
-    let entry = LogEntry {
-        timestamp: Utc::now().to_rfc3339(),
-        action: action.to_string(),
-        file: file.to_string(),
-        vault_file: vault_file.map(|s| s.to_string()),
-    };
-
-    let json = serde_json::to_string(&entry).unwrap();
+/// Appends a log entry with timestamp
+pub fn log_op(log_path: &Path, message: &str) -> io::Result<()> {
+    let now = Utc::now().to_rfc3339();
+    let entry = format!("[{}] {}\n", now, message);
 
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("vault/vault.log")
-        .unwrap();
+        .open(log_path)?;
 
-    writeln!(file, "{}", json).unwrap();
+    file.write_all(entry.as_bytes())
+}
+
+/// Prints the contents of the vault log
+pub fn print_log(log_path: &Path) -> io::Result<()> {
+    if log_path.exists() {
+        let contents = read_to_string(log_path)?;
+        println!("--- Vault Log ---\n{}", contents);
+    } else {
+        println!("No log file found.");
+    }
+    Ok(())
 }

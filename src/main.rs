@@ -1,77 +1,99 @@
-use std::env;
-use std::path::Path;
-use std::io;
+mod compress;
+mod crypto;
+mod log;
 mod vault;
-use rpassword::read_password;
-use vault::vault::Vault;
 
-fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
+use std::path::PathBuf;
+use clap::{Parser, Subcommand};
 
-    if args.len() < 2 {
-        eprintln!("Usage:");
-        eprintln!("vault new <vault_dir> <vault_name>");
-        eprintln!("vault add -f <file> -v <vault_file>");
-        eprintln!("vault extract -f <file> -v <vault_file>");
-        eprintln!("vault rem -f <file> -v <vault_file>");
-        eprintln!("vault remex -f <file> -v <vault_file> -o <output>");
-        eprintln!("vault log -v <vault_file>");
-        return Ok(());
-    }
+#[derive(Parser)]
+#[command(name = "vault")]
+#[command(about = "A secure encrypted file vault with compression and logging.", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    match args[1].as_str() {
-        "new" => {
-            let dir = Path::new(&args[2]);
-            let name = &args[3];
-            println!("Set password for new vault:");
-            let password = read_password().unwrap();
-            Vault::new(dir, name, &password)?;
+#[derive(Subcommand)]
+enum Commands {
+    /// Create a new vault
+    New {
+        /// Directory to place the vault
+        vault_directory: PathBuf,
+        /// Name of the vault
+        vault_name: String,
+    },
+
+    /// Add a file to the vault
+    Add {
+        #[arg(short, long)]
+        file: PathBuf,
+        #[arg(short, long)]
+        vault: PathBuf,
+    },
+
+    /// Extract a file from the vault
+    Extract {
+        #[arg(short, long)]
+        file: String,
+        #[arg(short, long)]
+        vault: PathBuf,
+    },
+
+    /// Remove a file from the vault
+    Rem {
+        #[arg(short, long)]
+        file: String,
+        #[arg(short, long)]
+        vault: PathBuf,
+    },
+
+    /// Extract and then remove a file
+    Remex {
+        #[arg(short, long)]
+        file: String,
+        #[arg(short, long)]
+        vault: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+
+    /// Show operation log for the vault
+    Log {
+        #[arg(short, long)]
+        vault: PathBuf,
+    },
+}
+
+fn main() -> std::io::Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::New { vault_directory, vault_name } => {
+            vault::create_vault(&vault_directory, &vault_name)?;
         }
-        "add" => {
-            let file = Path::new(&args[3]);
-            let vault_path = Path::new(&args[5]);
-            println!("Enter password:");
-            let password = read_password().unwrap();
-            let mut vault = Vault::open(vault_path, &password)?;
-            vault.add_file(file)?;
+
+        Commands::Add { file, vault } => {
+            vault::add_file(&file, &vault)?;
         }
-        "extract" => {
-            let file = &args[3];
-            let vault_path = Path::new(&args[5]);
-            println!("Enter password:");
-            let password = read_password().unwrap();
-            let vault = Vault::open(vault_path, &password)?;
-            vault.extract_file(file, Path::new(file))?;
+
+        Commands::Extract { file, vault } => {
+            vault::extract_file(&file, &vault)?;
         }
-        "rem" => {
-            let file = &args[3];
-            let vault_path = Path::new(&args[5]);
-            println!("Enter password:");
-            let password = read_password().unwrap();
-            let mut vault = Vault::open(vault_path, &password)?;
-            vault.remove_file(file)?;
+
+        Commands::Rem { file, vault } => {
+            vault::remove_file(&file, &vault)?;
         }
-        "remex" => {
-            let file = &args[3];
-            let vault_path = Path::new(&args[5]);
-            let output_path = Path::new(&args[7]);
-            println!("Enter password:");
-            let password = read_password().unwrap();
-            let mut vault = Vault::open(vault_path, &password)?;
-            vault.remove_and_extract(file, output_path)?;
+
+        Commands::Remex { file, vault, output } => {
+            vault::remex_file(&file, &vault, &output)?;
         }
-        "log" => {
-            let vault_path = Path::new(&args[3]);
-            println!("Enter password:");
-            let password = read_password().unwrap();
-            let vault = Vault::open(vault_path, &password)?;
-            vault.show_log()?;
-        }
-        _ => {
-            eprintln!("Unknown command.");
+
+        Commands::Log { vault } => {
+            let path = vault.with_extension("log");
+            log::print_log(&path)?;
         }
     }
 
     Ok(())
-
 }
