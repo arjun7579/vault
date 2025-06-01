@@ -2,12 +2,12 @@ use crate::{compress, crypto, log::log_op};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
-use chrono::{Utc, DateTime};
+use chrono::Utc;
 use rpassword::prompt_password;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 const VAULT_EXT: &str = "vlt";
 
@@ -23,27 +23,27 @@ struct Vault {
     files: HashMap<String, VaultEntry>,
 }
 
-/// Gets path to log file (next to .vlt file)
 fn log_path(vault_path: &Path) -> PathBuf {
     let mut path = vault_path.to_path_buf();
     path.set_extension("log");
     path
 }
 
-/// Loads vault from file
 fn load_vault(path: &Path) -> std::io::Result<Vault> {
-    let data = fs::read(path)?;
-    Ok(bincode::deserialize(&data).unwrap_or_default())
+    if path.exists() {
+        let data = fs::read(path)?;
+        Ok(bincode::deserialize(&data).unwrap_or_default())
+    } else {
+        Ok(Vault::default())
+    }
 }
 
-/// Saves vault to file
 fn save_vault(path: &Path, vault: &Vault) -> std::io::Result<()> {
     let data = bincode::serialize(vault).unwrap();
     fs::write(path, data)?;
     Ok(())
 }
 
-/// Creates a new vault
 pub fn create_vault(dir: &Path, name: &str) -> std::io::Result<()> {
     let vault_path = dir.join(format!("{}.{}", name, VAULT_EXT));
     if vault_path.exists() {
@@ -51,43 +51,32 @@ pub fn create_vault(dir: &Path, name: &str) -> std::io::Result<()> {
         return Ok(());
     }
 
-    fs::write(&vault_path, bincode::serialize(&Vault::default()).unwrap())?;
+    save_vault(&vault_path, &Vault::default())?;
     fs::write(log_path(&vault_path), b"Vault created\n")?;
-
     println!("Vault created: {}", vault_path.display());
     Ok(())
 }
 
-/// Adds a file to the vault
 pub fn add_file(file_path: &Path, vault_path: &Path) -> std::io::Result<()> {
     let file_name = file_path.file_name().unwrap().to_string_lossy().to_string();
     let vault_pw = prompt_password("Vault password: ").unwrap();
     let file_pw = prompt_password("File password: ").unwrap();
-
     let created_at = Utc::now().to_rfc3339();
 
     let mut file_data = Vec::new();
     File::open(file_path)?.read_to_end(&mut file_data)?;
-
-    let compressed = compress::compress(&file_data);
+    let compressed = compress::compress_f(&file_data)?;
     let key = crypto::derive_key(&vault_pw, &file_pw, &created_at);
     let (nonce, encrypted) = crypto::encrypt(&compressed, &key);
 
     let mut vault = load_vault(vault_path)?;
-    vault.files.insert(file_name.clone(), VaultEntry {
-        data: encrypted,
-        nonce,
-        created_at: created_at.clone(),
-    });
+    vault.files.insert(file_name.clone(), VaultEntry { data: encrypted, nonce, created_at: created_at.clone() });
     save_vault(vault_path, &vault)?;
-
     log_op(&log_path(vault_path), &format!("ADD: {} @ {}", file_name, created_at))?;
     println!("File added.");
-
     Ok(())
 }
 
-/// Extracts a file from the vault
 pub fn extract_file(file_name: &str, vault_path: &Path) -> std::io::Result<()> {
     let vault_pw = prompt_password("Vault password: ").unwrap();
     let file_pw = prompt_password("File password: ").unwrap();
@@ -103,16 +92,14 @@ pub fn extract_file(file_name: &str, vault_path: &Path) -> std::io::Result<()> {
 
     let key = crypto::derive_key(&vault_pw, &file_pw, &entry.created_at);
     let decrypted = crypto::decrypt(&entry.data, &key, &entry.nonce);
-    let decompressed = compress::decompress(&decrypted);
+    let decompressed = compress::decompress_f(&decrypted)?;
 
     fs::write(file_name, decompressed)?;
     log_op(&log_path(vault_path), &format!("EXTRACT: {}", file_name))?;
-
     println!("File extracted: {}", file_name);
     Ok(())
 }
 
-/// Removes a file from the vault
 pub fn remove_file(file_name: &str, vault_path: &Path) -> std::io::Result<()> {
     let mut vault = load_vault(vault_path)?;
     if vault.files.remove(file_name).is_some() {
@@ -125,7 +112,6 @@ pub fn remove_file(file_name: &str, vault_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Extracts then removes a file
 pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> std::io::Result<()> {
     let vault_pw = prompt_password("Vault password: ").unwrap();
     let file_pw = prompt_password("File password: ").unwrap();
@@ -141,12 +127,11 @@ pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> std::i
 
     let key = crypto::derive_key(&vault_pw, &file_pw, &entry.created_at);
     let decrypted = crypto::decrypt(&entry.data, &key, &entry.nonce);
-    let decompressed = compress::decompress(&decrypted);
+    let decompressed = compress::decompress_f(&decrypted)?;
 
     fs::write(out_path, decompressed)?;
     save_vault(vault_path, &vault)?;
     log_op(&log_path(vault_path), &format!("REMEX: {} -> {}", file_name, out_path.display()))?;
-
     println!("File extracted and removed.");
     Ok(())
 }

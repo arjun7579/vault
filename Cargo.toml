@@ -5,6 +5,15 @@ edition = "2024"
 
 
 [dependencies]
-bitstream-io = "1.2"
-chrono = "0.4.41"
-serde = "1.0.219"
+aes = "0.8"
+ctr = "0.9"
+cipher = "0.4"
+sha2 = "0.10"
+bincode = "1.3"
+rand = "0.8"
+chrono = "0.4"
+rpassword = "7.2"
+serde = { version = "1.0", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
+bitstream-io = "4.1.0"
+flate2 = "1.0"
