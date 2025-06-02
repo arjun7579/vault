@@ -112,3 +112,8 @@ Vault created
 _Made with 🦀 by arjun7579_
 
 ---
+Output Screenshots (on command line):
+
+![image](https://github.com/user-attachments/assets/625910f1-a3b2-4792-bbe8-7a73920b7eed)
+
+![image](https://github.com/user-attachments/assets/0e9db14f-7247-4298-b2d6-e27b7e428ef3)
