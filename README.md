@@ -22,7 +22,6 @@ Vaults are binary `.vlt` files storing a serialized map of files:
 
 HashMap<String, VaultEntry>
 
-text
 
 Each `VaultEntry` contains:
 
@@ -46,7 +45,6 @@ vault/
 ├── Cargo.toml
 └── README.md
 
-text
 
 ---
 
@@ -54,19 +52,11 @@ text
 
 ### 🔧 Build
 
-git clone https://github.com/yourusername/vault.git
+git clone https://github.com/arjun7579/vault.git
 cd vault
 cargo build --release
 
-text
-
 ---
-
-## 🛠 Usage
-
-vault <command> [args]
-
-text
 
 ### 📌 Commands
 
