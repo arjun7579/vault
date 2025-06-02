@@ -37,14 +37,13 @@ Vaults are paired with `.log` files to track all actions performed on them.
 
 vault/
 ├── src/
-│ ├── main.rs
+│ ├── main.rs # CLI entry point
 │ ├── vault.rs # Vault file management (add/extract/remove)
 │ ├── compress.rs # Compression/decompression logic
 │ ├── crypto.rs # Encryption, decryption, key derivation
 │ └── log.rs # Operation logging
-├── Cargo.toml
-└── README.md
-
+├── Cargo.toml # Rust package manifest
+└── README.md # Project documentation
 
 ---
 
