@@ -42,7 +42,9 @@ Vaults are paired with `.log` files to track all actions performed on them.
 ### 🔧 Build
 
 git clone https://github.com/arjun7579/vault.git
+
 cd vault
+
 cargo build --release
 
 ---
@@ -74,8 +76,11 @@ All commands involving files prompt for both the vault password and file passwor
 Every vault operation is logged to a plaintext file:
 
 Vault created
+
 [2025-06-01T13:19:28.343876253+00:00] ADD: f1.txt @ 2025-06-01T13:19:28.342844292+00:00
+
 [2025-06-01T13:19:45.159780936+00:00] ADD: f2.txt @ 2025-06-01T13:19:45.158930221+00:00
+
 [2025-06-01T13:20:58.312826976+00:00] EXTRACT: f1.txt
 
 ---
@@ -104,10 +109,6 @@ Vault created
 
 ---
 
-## 📝 License
-
-Licensed under the MIT License.
-
-_Made with 🦀 by arjun_
+_Made with 🦀 by arjun7579_
 
 ---
