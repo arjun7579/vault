@@ -35,17 +35,7 @@ Vaults are paired with `.log` files to track all actions performed on them.
 
 ## 📂 Project Structure
 
-vault/
-├── src/
-│ ├── main.rs # CLI entry point
-│ ├── vault.rs # Vault file management (add/extract/remove)
-│ ├── compress.rs # Compression/decompression logic
-│ ├── crypto.rs # Encryption, decryption, key derivation
-│ └── log.rs # Operation logging
-├── Cargo.toml # Rust package manifest
-└── README.md # Project documentation
 
----
 
 ## 🚀 Quickstart
 
@@ -68,17 +58,6 @@ cargo build --release
 | remex    | Extract and then remove a file     |
 
 All commands involving files prompt for both the vault password and file password.
-
----
-
-## 🧪 Example
-
-vault create myvault
-vault add secrets.txt myvault.vlt
-vault extract secrets.txt myvault.vlt
-vault remex secrets.txt myvault.vlt --out ./secrets_out.txt
-
-text
 
 ---
 
