@@ -1,45 +1,61 @@
-use aes::Aes256;
-use ctr::cipher::{KeyIvInit, StreamCipher};
-use rand::RngCore;
+// src/crypto.rs
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    AeadCore, Aes256Gcm, Nonce,
+};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use sha2::{Digest, Sha256};
-use aes::cipher::generic_array::GenericArray;
 
-type AesCtr = ctr::Ctr128BE<Aes256>;
+/// Hashes the master password with Argon2.
+pub fn hash_master_password(password: &str) -> String {
+    let salt = SaltString::generate(&mut OsRng);
+    Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .expect("Argon2 hashing failed")
+        .to_string()
+}
 
-/// Derives a 256-bit AES key from vault password, file password, and creation time.
-/// All inputs are strings.
-pub fn derive_key(vault_pw: &str, file_pw: &str, creation_time: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
+/// Verifies the master password against the stored Argon2 hash.
+pub fn verify_master_password(password: &str, full_hash: &str) -> bool {
+    if let Ok(parsed_hash) = PasswordHash::new(full_hash) {
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok()
+    } else {
+        false
+    }
+}
+
+/// Derives a deterministic 256-bit file key.
+pub fn derive_file_key(vault_pw: &str, file_pw: &str, creation_time: &str) -> [u8; 32] {
+    let mut hasher = Sha256::default();
     hasher.update(vault_pw.as_bytes());
     hasher.update(file_pw.as_bytes());
     hasher.update(creation_time.as_bytes());
-    let result = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
-    key
+    hasher.finalize().into()
 }
 
-/// Encrypts data with AES-CTR using derived key.
-/// Returns a tuple of (nonce, ciphertext).
-pub fn encrypt(data: &[u8], key: &[u8; 32]) -> (Vec<u8>, Vec<u8>) {
-    let mut nonce = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut nonce);
-
-    let key = GenericArray::from_slice(key);
-    let nonce_ga = GenericArray::from_slice(&nonce);
-
-    let mut cipher = AesCtr::new(key, nonce_ga);
-    let mut buffer = data.to_vec();
-    cipher.apply_keystream(&mut buffer);
-
-    (nonce.to_vec(), buffer)
+/// Encrypts plaintext with AES-256-GCM.
+pub fn encrypt(
+    plaintext: &[u8],
+    key_bytes: &[u8; 32],
+) -> Result<(Vec<u8>, Vec<u8>), aes_gcm::Error> {
+    let cipher = Aes256Gcm::new(key_bytes.into());
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher.encrypt(&nonce, plaintext)?;
+    Ok((nonce.to_vec(), ciphertext))
 }
 
-/// Decrypts data with AES-CTR using key and nonce.
-/// Returns the plaintext.
-pub fn decrypt(ciphertext: &[u8], key: &[u8; 32], nonce: &[u8]) -> Vec<u8> {
-    let mut cipher = AesCtr::new(key.into(), nonce.into());
-    let mut buffer = ciphertext.to_vec();
-    cipher.apply_keystream(&mut buffer);
-    buffer
+/// Decrypts ciphertext with AES-256-GCM.
+pub fn decrypt(
+    ciphertext: &[u8],
+    key_bytes: &[u8; 32],
+    nonce_bytes: &[u8],
+) -> Result<Vec<u8>, aes_gcm::Error> {
+    let cipher = Aes256Gcm::new(key_bytes.into());
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher.decrypt(nonce, ciphertext)
 }

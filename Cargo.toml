@@ -1,19 +1,28 @@
 [package]
 name = "vault"
-version = "0.1.0"
-edition = "2024"
-
+version = "1.0.0"
+edition = "2021"
+authors = ["arjun7579"]
+description = "A secure, production-grade file vault with authenticated encryption."
 
 [dependencies]
-aes = "0.8"
-ctr = "0.9"
-cipher = "0.4"
-sha2 = "0.10"
-bincode = "1.3"
-rand = "0.8"
-chrono = "0.4"
-rpassword = "7.2"
-serde = { version = "1.0", features = ["derive"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-bitstream-io = "4.1.0"
-flate2 = "1.0"
+compress = { path = "src/compress.rs" }
+crypto = { path = "src/crypto.rs" }
+indicatif = "0.17"
+logger = { path = "src/logger.rs" }
+rpassword = "7.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+vault = { path = "src/vault.rs" }
+zeroize = { version = "1", features = ["zeroize_derive"] }
+
+[[bin]]
+name = "vault"
+path = "src/main.rs"
