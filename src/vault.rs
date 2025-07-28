@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: MIT
-
 use crate::{compress, crypto};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{self, Cursor, Read},
+    io::{self, Cursor, Read, Write},
     path::{Path},
 };
 use chrono::Utc;
@@ -208,15 +206,43 @@ pub fn extract_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
 #[instrument(skip(file_name, vault_path))]
 pub fn remove_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
     let mut vault = load_vault(vault_path)?;
-    if get_and_verify_vault_password(&vault).is_none() {
+    let mut vault_pw = match get_and_verify_vault_password(&vault) {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    let entry = match vault.files.get(file_name) {
+        Some(e) => e.clone(),
+        None => {
+            error!(file_name, "File not found for removal.");
+            return Ok(());
+        }
+    };
+
+    info!(file_name, "Verifying file password before deletion.");
+    let mut file_pw = Zeroizing::new(prompt_password("Enter password for file to be deleted: ").unwrap());
+
+    let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &file_pw, &entry.created_at));
+
+    if crypto::decrypt(&entry.data, &key, &entry.nonce).is_err() {
+        error!(file_name, "Incorrect file password. Deletion aborted.");
+        key.zeroize();
+        vault_pw.zeroize();
+        file_pw.zeroize();
         return Ok(());
     }
+
+    info!(file_name, "File password verified. Proceeding with deletion.");
     if vault.files.remove(file_name).is_some() {
         save_vault(vault_path, &vault)?;
-        info!(file_name, "File removed.");
+        info!(file_name, "File removed successfully.");
     } else {
-        error!(file_name, "File not found for removal.");
+        error!(file_name, "File was present but could not be removed.");
     }
+
+    key.zeroize();
+    vault_pw.zeroize();
+    file_pw.zeroize();
     Ok(())
 }
 
@@ -260,27 +286,17 @@ pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> io::Re
 }
 
 #[instrument(skip(vault_path))]
-#[instrument(skip(vault_path))]
 pub fn check_vault(vault_path: &Path) -> io::Result<()> {
     let vault = load_vault(vault_path)?;
     let mut vault_pw = match get_and_verify_vault_password(&vault) {
         Some(p) => p,
         None => return Ok(()),
     };
-
     info!("Vault master password OK. Checking file integrity...");
     let mut tampered_files = 0;
-
     for (file_name, entry) in &vault.files {
-        // FIX: Create a `String` which can be owned and zeroized.
-        let mut dummy_file_pw = Zeroizing::new(String::from("integrity-check"));
-        
-        let mut key = Zeroizing::new(crypto::derive_file_key(
-            &vault_pw,
-            &dummy_file_pw,
-            &entry.created_at,
-        ));
-
+        let dummy_pw = Zeroizing::new(String::from("integrity-check"));
+        let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &dummy_pw, &entry.created_at));
         if crypto::decrypt(&entry.data, &key, &entry.nonce).is_err() {
             error!(file_name, "File authentication failed. Possible tampering or corruption.");
             tampered_files += 1;
@@ -288,7 +304,6 @@ pub fn check_vault(vault_path: &Path) -> io::Result<()> {
             info!(file_name, "File integrity verified.");
         }
         key.zeroize();
-        dummy_file_pw.zeroize(); // Now we can zeroize the dummy password
     }
     vault_pw.zeroize();
 
@@ -310,7 +325,6 @@ pub fn list_files(vault_path: &Path) -> io::Result<()> {
     let mut files: Vec<_> = vault.files.keys().collect();
     files.sort();
 
-    // Use a standard println for direct user-facing output that isn't a log event.
     println!("\nFiles in vault '{}':", vault_path.display());
     if files.is_empty() {
         println!("  (No files)");
@@ -322,7 +336,47 @@ pub fn list_files(vault_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-// Helper struct for on-the-fly hashing of a stream
+#[instrument(skip(vault_path))]
+pub fn delete_vault(vault_path: &Path) -> io::Result<()> {
+    let vault = match load_vault(vault_path) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to load vault for deletion: {}", e);
+            return Ok(());
+        }
+    };
+
+    if get_and_verify_vault_password(&vault).is_none() {
+        error!("Password verification failed. Vault deletion aborted.");
+        return Ok(());
+    }
+
+    let vault_name = vault_path.file_stem().unwrap_or_default().to_string_lossy();
+    warn!(
+        path = %vault_path.display(),
+        "You are about to permanently delete this vault and all its contents."
+    );
+    print!("This action is irreversible. To confirm, type the vault's name ('{}'): ", vault_name);
+    io::stdout().flush()?;
+
+    let mut confirmation = String::new();
+    io::stdin().read_line(&mut confirmation)?;
+
+    if confirmation.trim() == vault_name {
+        fs::remove_file(vault_path)?;
+        let log_path = vault_path.with_extension("log");
+        if log_path.exists() {
+            let _ = fs::remove_file(log_path);
+        }
+        info!(path = %vault_path.display(), "Vault has been permanently deleted.");
+    } else {
+        info!("Confirmation failed. Vault deletion aborted.");
+    }
+
+    Ok(())
+}
+
+
 struct TeeReader<'a, R: Read> {
     reader: R,
     hasher: &'a mut Sha256,
