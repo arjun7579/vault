@@ -1,7 +1,7 @@
 use aes_gcm::{
     aead::{Aead, KeyInit},
     AeadCore, // FIX 2: Import the trait that provides `generate_nonce`
-    Aes256Gcm, Key, Nonce,
+    Aes256Gcm, Nonce,
 };
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
