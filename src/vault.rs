@@ -1,4 +1,4 @@
-use crate::{compress, crypto};
+use crate::{compress, crypto, log::log_op};
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -6,21 +6,22 @@ use std::{
     path::{Path, PathBuf},
 };
 use chrono::Utc;
-use indicatif::{ProgressBar, ProgressStyle};
 use rpassword::prompt_password;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
 const VAULT_EXT: &str = "vlt";
-const TEMP_EXT: &str = "tmp";
 
-#[derive(Serialize, Deserialize, Clone)]
+// NEW: Vault struct now stores the master password hash directly.
+#[derive(Serialize, Deserialize)]
 struct Vault {
-    password_hash: String,
+    password_hash: String, // Stores the full Argon2 hash string
     files: HashMap<String, VaultEntry>,
 }
 
+// NEW: The default vault is now one with an empty hash and no files.
 impl Default for Vault {
     fn default() -> Self {
         Self {
@@ -30,131 +31,137 @@ impl Default for Vault {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
 struct VaultEntry {
-    compression_algo: compress::Algorithm,
     data: Vec<u8>,
     nonce: Vec<u8>,
     created_at: String,
     hash: Vec<u8>,
 }
 
+fn log_path(vault_path: &Path) -> PathBuf {
+    vault_path.with_extension("log")
+}
+
 fn load_vault(path: &Path) -> io::Result<Vault> {
     if path.exists() {
         let data = fs::read(path)?;
-        let vault = bincode::deserialize(&data)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to deserialize vault: {}", e)))?;
-        Ok(vault)
+        // Use unwrap_or_default for robustness against empty/corrupt files
+        Ok(bincode::deserialize(&data).unwrap_or_default())
     } else {
+        // If the file doesn't exist, it's an error, not a new vault.
+        // `create_vault` is the explicit way to make a new one.
         Err(io::Error::new(io::ErrorKind::NotFound, "Vault file not found."))
     }
 }
 
 fn save_vault(path: &Path, vault: &Vault) -> io::Result<()> {
-    let temp_path = path.with_extension(TEMP_EXT);
-    let data = bincode::serialize(vault)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to serialize vault: {}", e)))?;
-    fs::write(&temp_path, &data)?;
-    fs::rename(&temp_path, path)?;
-    Ok(())
+    let data = bincode::serialize(vault)?;
+    fs::write(path, data)
 }
 
+// REMOVED: All functions related to /etc are no longer needed.
+
+// NEW: A single function to prompt for and verify the master password.
 fn get_and_verify_vault_password(vault: &Vault) -> Option<Zeroizing<String>> {
     if vault.password_hash.is_empty() {
-        println!("Error: Vault appears to be new or corrupted (no password hash found).");
+        // This case handles a newly created but not yet saved vault, or a corrupt one.
         return None;
     }
     for _ in 0..3 {
+        // Use Zeroizing to securely handle the password in memory.
         let mut password = Zeroizing::new(prompt_password("Vault password: ").ok()?);
         if crypto::verify_master_password(&password, &vault.password_hash) {
             return Some(password);
         } else {
-            println!("Incorrect password.");
-            password.zeroize();
+            print_color("Incorrect password.\n", Color::Red);
+            password.zeroize(); // Securely wipe incorrect password attempt.
         }
     }
-    println!("Error: Too many incorrect password attempts.");
     None
 }
 
+fn file_hash(data: &[u8]) -> Vec<u8> {
+    Sha256::digest(data).to_vec()
+}
+
+// NEW: `create_vault` is heavily modified for the portable model.
 pub fn create_vault(dir: &Path, name: &str) -> io::Result<()> {
     let vault_path = dir.join(format!("{}.{}", name, VAULT_EXT));
+
     if vault_path.exists() {
-        println!("Error: A vault with this name already exists in this directory.");
+        print_color("A vault with this name already exists in this directory.\n", Color::Red);
         return Ok(());
     }
+
     let mut pw = Zeroizing::new(prompt_password("Create vault password: ").unwrap());
     let hash = crypto::hash_master_password(&pw);
-    pw.zeroize();
+    pw.zeroize(); // Wipe password from memory immediately.
+
     let vault = Vault {
         password_hash: hash,
         files: HashMap::new(),
     };
+
     save_vault(&vault_path, &vault)?;
-    println!("Vault created: {}", vault_path.display());
+    fs::write(log_path(&vault_path), b"Vault created\n")?;
+    print_color(&format!("Vault created: {}\n", vault_path.display()), Color::Green);
     Ok(())
 }
 
-pub fn add_file(
-    file_path: &Path,
-    vault_path: &Path,
-    algorithm: compress::Algorithm,
-) -> io::Result<()> {
+// NEW: `add_file` is updated for the new password flow and error handling.
+pub fn add_file(file_path: &Path, vault_path: &Path) -> io::Result<()> {
     let file_name = file_path.file_name().unwrap().to_string_lossy().to_string();
     let mut vault = load_vault(vault_path)?;
+
     let mut vault_pw = match get_and_verify_vault_password(&vault) {
         Some(p) => p,
         None => return Ok(()),
     };
+
     let mut file_pw = Zeroizing::new(prompt_password("File password: ").unwrap());
     let created_at = Utc::now().to_rfc3339();
 
-    let mut hasher = Sha256::default();
-    let compressed_data;
-    {
-        let source_file = File::open(file_path)?;
-        let file_size = source_file.metadata()?.len();
-        println!("Adding file '{}'...", file_name);
-        let pb = ProgressBar::new(file_size);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                .unwrap()
-                .progress_chars("=>-"),
-        );
-        let progress_reader = pb.wrap_read(source_file);
-        let mut tee_reader = TeeReader::new(progress_reader, &mut hasher);
-        let mut compressed_reader = compress::compress_stream(&mut tee_reader, algorithm);
-        let mut data_buf = Vec::new();
-        compressed_reader.read_to_end(&mut data_buf)?;
-        compressed_data = data_buf;
-        pb.finish_with_message("Read and compressed.");
-    }
-    let hash = hasher.finalize().to_vec();
+    let file_data = fs::read(file_path)?;
+    let compressed = compress::compress_f(&file_data)?;
 
     let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &file_pw, &created_at));
-    let (nonce, encrypted) = crypto::encrypt(&compressed_data, &key)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Encryption failed: {}", e)))?;
+    
+    // Handle potential encryption error
+    let (nonce, encrypted) = match crypto::encrypt(&compressed, &key) {
+        Ok(result) => result,
+        Err(_) => {
+            print_color("Fatal: File encryption failed.\n", Color::Red);
+            return Ok(());
+        }
+    };
+    let hash = file_hash(&file_data);
+
+    // Wipe sensitive data as soon as it's no longer needed.
     key.zeroize();
     vault_pw.zeroize();
     file_pw.zeroize();
 
-    let status = if vault.files.contains_key(&file_name) { "MODIFIED" } else { "ADDED" };
-    vault.files.insert(
-        file_name.clone(),
-        VaultEntry {
-            compression_algo: algorithm,
-            data: encrypted,
-            nonce,
-            created_at,
-            hash,
-        },
-    );
+    let status = if let Some(entry) = vault.files.get(&file_name) {
+        if entry.hash != hash { "MODIFIED" } else { "UNCHANGED" }
+    } else {
+        "ADDED"
+    };
+
+    vault.files.insert(file_name.clone(), VaultEntry {
+        data: encrypted,
+        nonce,
+        created_at: created_at.clone(),
+        hash,
+    });
+
     save_vault(vault_path, &vault)?;
-    println!("File {}: {}", status.to_lowercase(), file_name);
+    log_op(&log_path(vault_path), &format!("{}: {} @ {}", status, file_name, created_at))?;
+    print_color(&format!("File {}.\n", status.to_lowercase()), Color::Green);
     Ok(())
 }
 
+// NEW: `extract_file` is updated for the new password flow and error handling.
 pub fn extract_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
     let vault = load_vault(vault_path)?;
     let mut vault_pw = match get_and_verify_vault_password(&vault) {
@@ -162,54 +169,56 @@ pub fn extract_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
         None => return Ok(()),
     };
     let mut file_pw = Zeroizing::new(prompt_password("File password: ").unwrap());
+
     let entry = match vault.files.get(file_name) {
         Some(e) => e,
         None => {
-            println!("Error: File not found in vault.");
+            print_color("File not found.\n", Color::Red);
             return Ok(());
         }
     };
 
     let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &file_pw, &entry.created_at));
-    let decrypted_data = crypto::decrypt(&entry.data, &key, &entry.nonce)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Decryption failed: {}", e)))?;
+
+    let decrypted = match crypto::decrypt(&entry.data, &key, &entry.nonce) {
+        Ok(pt) => pt,
+        Err(_) => {
+            print_color("Decryption failed! The password may be wrong or the data has been tampered with.\n", Color::Red);
+            return Ok(());
+        }
+    };
+
     key.zeroize();
     vault_pw.zeroize();
     file_pw.zeroize();
 
-    let decrypted_size = decrypted_data.len() as u64;
-    let decrypted_reader = io::Cursor::new(decrypted_data);
-    println!("Extracting file '{}'...", file_name);
-    let pb = ProgressBar::new(decrypted_size);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .unwrap()
-            .progress_chars("=>-"),
-    );
-    let progress_reader = pb.wrap_read(decrypted_reader);
-    let mut decompressed_reader = compress::decompress_stream(progress_reader, entry.compression_algo);
-    let mut dest_file = File::create(file_name)?;
-    io::copy(&mut decompressed_reader, &mut dest_file)?;
-    pb.finish_with_message("Decompressed and written to disk.");
-    println!("File extracted: {}", file_name);
+    let decompressed = compress::decompress_f(&decrypted)?;
+
+    fs::write(file_name, decompressed)?;
+    log_op(&log_path(vault_path), &format!("EXTRACT: {}", file_name))?;
+    print_color(&format!("File extracted: {}\n", file_name), Color::Green);
     Ok(())
 }
 
+// NEW: `remove_file` is updated.
 pub fn remove_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
     let mut vault = load_vault(vault_path)?;
+    // We need the password to authorize the removal.
     if get_and_verify_vault_password(&vault).is_none() {
         return Ok(());
     }
+
     if vault.files.remove(file_name).is_some() {
         save_vault(vault_path, &vault)?;
-        println!("File removed: {}", file_name);
+        log_op(&log_path(vault_path), &format!("REMOVE: {}", file_name))?;
+        print_color("File removed.\n", Color::Yellow);
     } else {
-        println!("Error: File not found for removal.");
+        print_color("File not found.\n", Color::Red);
     }
     Ok(())
 }
 
+// NEW: `remex_file` is updated.
 pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> io::Result<()> {
     let mut vault = load_vault(vault_path)?;
     let mut vault_pw = match get_and_verify_vault_password(&vault) {
@@ -217,99 +226,44 @@ pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> io::Re
         None => return Ok(()),
     };
     let mut file_pw = Zeroizing::new(prompt_password("File password: ").unwrap());
-    let entry = match vault.files.get(file_name).cloned() {
+
+    let entry = match vault.files.remove(file_name) {
         Some(e) => e,
         None => {
-            println!("Error: File not found for remex.");
+            print_color("File not found.\n", Color::Red);
             return Ok(());
         }
     };
 
     let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &file_pw, &entry.created_at));
-    let decrypted_data = match crypto::decrypt(&entry.data, &key, &entry.nonce) {
+    
+    let decrypted = match crypto::decrypt(&entry.data, &key, &entry.nonce) {
         Ok(pt) => pt,
-        Err(e) => {
-            println!("Error: Decryption failed: {}", e);
+        Err(_) => {
+            print_color("Decryption failed! The password may be wrong or the data has been tampered with. Re-adding file to vault.\n", Color::Red);
+            // Since we already removed the entry, put it back on failure.
+            vault.files.insert(file_name.to_string(), entry);
+            save_vault(vault_path, &vault)?;
             return Ok(());
         }
     };
+
     key.zeroize();
     vault_pw.zeroize();
     file_pw.zeroize();
 
-    let decrypted_reader = io::Cursor::new(decrypted_data);
-    let mut decompressed_reader = compress::decompress_stream(decrypted_reader, entry.compression_algo);
-    let mut dest_file = File::create(out_path)?;
-    io::copy(&mut decompressed_reader, &mut dest_file)?;
+    let decompressed = compress::decompress_f(&decrypted)?;
 
-    vault.files.remove(file_name);
+    fs::write(out_path, decompressed)?;
     save_vault(vault_path, &vault)?;
-    println!("File extracted to {} and removed from vault.", out_path.display());
+    log_op(&log_path(vault_path), &format!("REMEX: {} -> {}", file_name, out_path.display()))?;
+    print_color("File extracted and removed.\n", Color::Yellow);
     Ok(())
 }
 
-pub fn check_vault(vault_path: &Path) -> io::Result<()> {
-    let vault = load_vault(vault_path)?;
-    if get_and_verify_vault_password(&vault).is_none() {
-        return Ok(());
-    }
-    println!("Vault master password OK.\nChecking file integrity...");
-    let mut tampered_files = 0;
-    for (file_name, entry) in &vault.files {
-        let dummy_pw = Zeroizing::new("integrity-check");
-        let mut key = Zeroizing::new(crypto::derive_file_key(&dummy_pw, &dummy_pw, &entry.created_at));
-        if crypto::decrypt(&entry.data, &key, &entry.nonce).is_err() {
-            println!("[FAIL] File '{}' authentication failed. Possible tampering or corruption.", file_name);
-            tampered_files += 1;
-        } else {
-            println!("[OK]   File '{}' integrity verified.", file_name);
-        }
-        key.zeroize();
-    }
-    if tampered_files == 0 {
-        println!("\nVault integrity check completed. All {} files are OK.", vault.files.len());
-    } else {
-        println!("\nVault integrity check completed. Found {} corrupted file(s).", tampered_files);
-    }
-    Ok(())
-}
-
-pub fn list_files(vault_path: &Path) -> io::Result<()> {
-    let vault = load_vault(vault_path)?;
-    if get_and_verify_vault_password(&vault).is_none() {
-        return Ok(());
-    }
-    println!("\nFiles in vault '{}':", vault_path.display());
-    if vault.files.is_empty() {
-        println!("  (No files)");
-    } else {
-        let mut files: Vec<_> = vault.files.keys().collect();
-        files.sort();
-        for file_name in files {
-            println!("  - {}", file_name);
-        }
-    }
-    Ok(())
-}
-
-// Helper struct for on-the-fly hashing of a stream
-struct TeeReader<'a, R: Read> {
-    reader: R,
-    hasher: &'a mut Sha256,
-}
-
-impl<'a, R: Read> TeeReader<'a, R> {
-    fn new(reader: R, hasher: &'a mut Sha256) -> Self {
-        Self { reader, hasher }
-    }
-}
-
-impl<'a, R: Read> Read for TeeReader<'a, R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let bytes_read = self.reader.read(buf)?;
-        if bytes_read > 0 {
-            self.hasher.update(&buf[..bytes_read]);
-        }
-        Ok(bytes_read)
-    }
+fn print_color(msg: &str, color: Color) {
+    let mut stdout = StandardStream::stdout(ColorChoice::Always);
+    stdout.set_color(ColorSpec::new().set_fg(Some(color))).unwrap();
+    write!(&mut stdout, "{}", msg).unwrap();
+    stdout.reset().unwrap();
 }

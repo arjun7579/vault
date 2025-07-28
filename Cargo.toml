@@ -22,3 +22,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 zstd = "0.13"
+rand
