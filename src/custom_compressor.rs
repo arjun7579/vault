@@ -64,10 +64,10 @@ fn build_huffman_tree(freq_map: &HashMap<u8, u64>) -> Option<Box<Node>> {
     heap.pop()
 }
 
-// Recursively traverses the tree to build the encoding map.
+//  recursively traverses the tree to build the encoding map.
 fn build_codes_recursive(node: &Node, prefix: Vec<bool>, codes: &mut HashMap<u8, Vec<bool>>) {
     if let Some(byte) = node.byte {
-        // Edge Case: If the tree is just a single node (e.g., file with one unique byte) it needs a code. We assign '0' by convention.
+        // Edge Case: if the tree is just a single node (e.g., file with one unique byte) it needs a code. We assign '0' by convention.
         if prefix.is_empty() {
             codes.insert(byte, vec![false]);
         } else {
@@ -87,7 +87,7 @@ fn build_codes_recursive(node: &Node, prefix: Vec<bool>, codes: &mut HashMap<u8,
     }
 }
 
-// Public API 
+// public API 
 pub fn compress(data: &[u8]) -> io::Result<Vec<u8>> {
     if data.is_empty() {
         return Ok(Vec::new());
@@ -123,7 +123,7 @@ pub fn compress(data: &[u8]) -> io::Result<Vec<u8>> {
         encoded_data.push(bit_buffer);
     }
 
-    // Serialize the frequency map to be used as the header for decompression.
+    //serialize the frequency map to be used as the header for decompression.
     let header = bincode::serialize(&freq_map)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     
