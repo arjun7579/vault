@@ -91,7 +91,7 @@ vault check --vault my_secrets.vlt
 # View operation log
 vault log --vault my_secrets.vlt
 ```
-use -h parameter for help
+use ```-h``` parameter for help
 
 ## 🛡️ Security Architecture
 
