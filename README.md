@@ -168,7 +168,7 @@ A seamless `edit` command that:
 ---
 ## 📄 License
 
-This project is licensed under the MIT License.
+### This project is licensed under the MIT License.
 ---
-__Made with ❤️ and rust by arjun7579__  
+##### __Made with ❤️ and rust by arjun7579__  
 ---
