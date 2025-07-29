@@ -2,10 +2,6 @@
 
 Vault is a secure, high-performance command-line application written in Rust for encrypted and compressed file storage. It allows you to safely manage sensitive files inside self-contained `.vlt` archives using modern, authenticated cryptography and robust engineering practices designed to prevent data loss.
 
-This project goes beyond a simple encryption tool by incorporating a production-grade architecture that prioritizes security, reliability, and performance.
-
-*(Embed a GIF or asciinema recording here to show the tool in action.)*
-
 ---
 
 ## ✨ Features
