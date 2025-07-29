@@ -133,6 +133,29 @@ A demonstration of lossless compression lives at `src/custom_compressor.rs`. It 
 - **tracing** — Structured, human‑readable logging  
 - **zeroize** — Securely wipe secrets from memory  
 ---
+
+## 🔭 Future Work
+
+While **Vault** is fully functional, here are some features planned for future releases to enhance its capabilities further:
+
+### 🔹 Interactive Shell Mode
+An interactive session (`vault shell <path>`) where a user can unlock a vault once with the master password and then perform multiple operations (add, list, extract, etc.) without re-entering credentials.
+
+### 🔹 Keyfile Authentication
+Support for using a file (e.g., from a USB drive) as an additional factor for authentication, or as the primary key instead of a password — enhancing security through two-factor or password-less access.
+
+### 🔹 Cloud Storage Sync
+Integration with cloud storage providers (like AWS S3 or Google Cloud Storage) to allow for secure, encrypted backups and synchronization of vaults across multiple devices.
+
+### 🔹 Role-Based Access Control (RBAC)
+A major architectural enhancement to support multiple users with different roles (e.g., **Admin**, **Contributor**, **Reader**), using public-key cryptography to manage access without sharing the master password.
+
+### 🔹 In-place File Editing
+A seamless `edit` command that:
+- Securely extracts a file to a temporary location
+- Opens it in the user's default text editor
+- Automatically re-encrypts and saves the changes back into the vault upon closing
+---
 ## 📄 License
 
 This project is licensed under the MIT License.
