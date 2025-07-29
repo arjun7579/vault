@@ -1,168 +1,145 @@
-# 🔐 Vault
+# 🔐 Vault: A Secure, Production-Grade File Vault
 
-**Vault** is a secure, lightweight, and extensible command-line application written in Rust for encrypted and compressed file storage. It lets you manage your private data safely inside `.vlt` archive files using modern cryptographic techniques and file-level metadata.
+Vault is a secure, high-performance command-line application written in Rust for encrypted and compressed file storage. It allows you to safely manage sensitive files inside self-contained `.vlt` archives using modern, authenticated cryptography and robust engineering practices designed to prevent data loss.
 
----
+This project goes beyond a simple encryption tool by incorporating a production-grade architecture that prioritizes security, reliability, and performance.
 
-## 📦 Features
-
-- 🔒 **AES-256 in CTR mode** for confidentiality  
-- 🔑 **File-level password protection**  
-- 🗝️ **Salted vault password** stored as a root-only hash at `/etc/.vault_pw_<vault>.hash`  
-- 🎨 **Colored CLI output** & **3-attempt retry** on password prompts  
-- 📚 **Custom Huffman compression** implemented from scratch  
-- 📂 **Add**, **extract**, **remove**, and **extract+remove (remex)** commands  
-- 📝 **Plaintext `.log`** file tracks every operation with timestamps  
-- ⚡ **Binary serialization** via `bincode`  
+*(Embed a GIF or asciinema recording here to show the tool in action.)*
 
 ---
 
-## 🧱 Vault Format
+## ✨ Features
 
+### Security
+- **Authenticated Encryption**  
+  Uses AES‑256‑GCM for confidentiality and integrity, preventing unauthorized access or silent data tampering.  
+- **Modern Password Hashing**  
+  Master password is secured with Argon2 (winner of the Password Hashing Competition), making brute‑force attacks impractical.  
+- **Granular Access Control**  
+  Supports both a master vault password and per-file passwords for layered security, even on deletion.  
+- **Secure Memory Handling**  
+  Utilizes the `zeroize` crate to wipe passwords and keys from memory immediately after use.  
+- **Secure Audit Trail**  
+  Maintains a persistent, **encrypted** log of all vault operations (add, remove, extract) inside the `.vlt` file itself.  
+- **Portable Vaults**  
+  Self‑contained `.vlt` files include salt and hash internally—no extra setup or permissions needed.
 
-A `.vlt` file contains a serialized:
+### Reliability & Performance
+- **Atomic File Writes**  
+  Uses a safe “write‑and‑rename” strategy to never leave a half‑written vault on disk.  
+- **Streaming I/O**  
+  Handles arbitrarily large files with constant memory overhead via a streaming pipeline.  
+- **Selectable Compression**  
+  Choose **Zstandard (zstd)** for speed or **DEFLATE (zip)** for maximum compatibility per‐file.  
+- **Data Integrity Checks**  
+  A `check` command verifies vault integrity and authenticity of every file entry.
 
-```rust
-HashMap<String, VaultEntry>
-```
-Each VaultEntry includes:
-
-- data: Vec<u8> — compressed & encrypted file contents
-
-- nonce: Vec<u8> — random 128-bit AES-CTR nonce
-
-- created_at: String — RFC3339 timestamp
-
-- hash: Vec<u8> — SHA-256 digest of the original file
-
-Vaults are paired with `.log` files to track all actions performed on them.
+### User Experience
+- **Rich CLI**  
+  Intuitive commands: `new`, `add`, `extract`, `remove`, `remex`, `list`, `check`, `delete`, `log`.  
+- **Progress Bars**  
+  Visual feedback for long operations via the `indicatif` crate.  
+- **Human‑Readable Logging**  
+  Clean, structured output powered by `tracing`.
 
 ---
 
 ## 🚀 Quickstart
 
-### 🔧 Build
+### Installation
+
 ```bash
-
 git clone https://github.com/arjun7579/vault.git
-
 cd vault
-
 cargo build --release
+# Binary will be at target/release/vault
 ```
----
 
-### 📌 Commands
+### Commands
 
-| Command  | Description                        |
-|----------|------------------------------------|
-| create   | Create a new vault                 |
-| add      | Add a file to an existing vault    |
-| extract  | Extract a file from the vault      |
-| remove   | Remove a file from the vault       |
-| remex    | Extract and then remove a file     |
+| Command  | Description                                                         |
+|----------|---------------------------------------------------------------------|
+| `new`    | Create a new, empty vault in a specified directory                  |
+| `add`    | Add a file to the vault (choose zstd or deflate compression)        |
+| `extract`| Extract a file from the vault into the current directory            |
+| `remove` | Permanently remove a file from the vault (requires file password)   |
+| `remex`  | Extract then immediately remove a file from the vault               |
+| `list`   | List all files currently stored in the vault                        |
+| `check`  | Verify vault integrity and authenticate every file entry            |
+| `delete` | Permanently delete the entire vault (with confirmation prompt)      |
+| `log`    | Display the secure, internal activity log for the vault             |
 
-All commands involving files prompt for both the vault password and file password.
 
----
+#### Example Usage
 
-## 🔐 Encryption & Password Storage
+```bash
+# Create a new vault
+vault new . my_secrets
 
-- **Encryption Algorithm:** AES-256 in CTR mode  
-- **Key Derivation:** SHA-256 of:
-  - Vault password  
-  - File password  
-  - RFC3339 creation timestamp  
-- **Nonce:** Random 128-bit value generated per file and stored alongside the ciphertext entry  
-- **Vault Password**  
-  - Prompted once at vault creation  
-  - **Salted** with 16 random bytes  
-  - Hashed via SHA-256  
-  - Stored in `/etc/.vault_pw_<vaultname>.hash`  
-    - File permissions set to `0o600` (owner read/write only)  
-    - Requires root/sudo to create or modify  
-- **File Passwords**  
-  - Prompted per file operation (`add`, `extract`, `remex`)  
-  - **Not** stored in cleartext—only used in-memory for key derivation  
-  - Combined with vault password and timestamp to derive the AES key  
+# Add a file with default zstd compression
+vault add --file important.docx --vault my_secrets.vlt
 
----
-## 🛠 Compression Details
+# Add a file with DEFLATE compression
+vault add --file photo.jpg --vault my_secrets.vlt --compression deflate
 
-- **Custom Huffman coder** written from scratch:
-  1. **Frequency map**: Count occurrences of each byte in the input.
-  2. **Deterministic tree build**:
-     - Insert all `(byte, frequency)` into a `BinaryHeap` (min-heap).
-     - Tie-break equal frequencies by byte value for stable output.
-  3. **Code generation**:
-     - Traverse the tree to assign each byte a unique bit‐vector.
-     - Assert code lengths ≤ 64 bits (guarding against overflow).
-  4. **Header serialization** (always sorted by byte):
-     - `u16` number of unique symbols  
-     - For each symbol: `u8` byte, then `u64` frequency  
-     - `u64` total number of encoded bits (for padding)  
-  5. **Payload encoding**:
-     - Pack each byte’s bit‐vector into a contiguous bitstream.
-     - Flush out full bytes as they fill, pad the last partial byte.
-  6. **Decompression**:
-     - Read the header to rebuild the exact same Huffman tree.
-     - Read the bitstream, walk the tree bit-by-bit to recover original bytes.
----
-## 📚 Logging
+# List the files inside
+vault list --vault my_secrets.vlt
 
-Every vault operation is logged to a plaintext file:
+# Check vault health
+vault check --vault my_secrets.vlt
 
-```console
-
-Vault created
-
-[2025-06-01T13:19:28.343876253+00:00] ADD: f1.txt @ 2025-06-01T13:19:28.342844292+00:00
-
-[2025-06-01T13:19:45.159780936+00:00] ADD: f2.txt @ 2025-06-01T13:19:45.158930221+00:00
-
-[2025-06-01T13:20:58.312826976+00:00] EXTRACT: f1.txt
+# View operation log
+vault log --vault my_secrets.vlt
 ```
----
+use -h parameter for help
 
-# 📦 Dependencies
+## 🛡️ Security Architecture
 
-| Crate Name       | Purpose                                 | GitHub Repository |
-|------------------|------------------------------------------|-------------------|
-| `aes`            | AES-256 block cipher                     | [RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers) |
-| `ctr`            | Counter (CTR) stream cipher mode         | [RustCrypto/stream-ciphers](https://github.com/RustCrypto/stream-ciphers) |
-| `cipher`         | Common cipher traits used by `aes`/`ctr` | [RustCrypto/traits](https://github.com/RustCrypto/traits) |
-| `sha2`           | SHA-256 hashing for key derivation       | [RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
-| `bincode`        | Fast binary serialization/deserialization| [bincode-org/bincode](https://github.com/bincode-org/bincode) |
-| `rand`           | Random number generation (nonce, salt)   | [rust-random/rand](https://github.com/rust-random/rand) |
-| `chrono`         | Timestamps in RFC3339                    | [chronotope/chrono](https://github.com/chronotope/chrono) |
-| `rpassword`      | Secure terminal password prompt          | [conradkleinespel/rpassword](https://github.com/conradkleinespel/rpassword) |
-| `serde`          | Serialization framework for structs      | [serde-rs/serde](https://github.com/serde-rs/serde) |
-| `clap`           | CLI argument parsing                     | [clap-rs/clap](https://github.com/clap-rs/clap) |
-| `bitstream-io`   | Bit-level I/O for custom compression     | [tuffy/bitstream-io](https://github.com/tuffy/bitstream-io) |
-| `flate2`         | Compression via DEFLATE                  | [alexcrichton/flate2-rs](https://github.com/alexcrichton/flate2-rs) |
-| `walkdir`        | Recursive directory traversal            | [BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |
-| `colored`        | Text coloring in terminal (optional)     | [mackwic/colored](https://github.com/mackwic/colored) |
-| `termcolor`      | Terminal-safe color output               | [BurntSushi/termcolor](https://github.com/BurntSushi/termcolor) |
+### Master Password
+- **Never stored in plaintext.**  
+- On vault creation, a random salt is generated and an Argon2 hash is derived.  
+- The hash (including salt and parameters) is embedded in the `.vlt` file, making the vault portable.
 
+### Per‑File Key Derivation
+For each file, derive a unique 256‑bit key using SHA‑256 over:
+1. Master password  
+2. Per‑file password  
+3. File creation timestamp  
 
----
+This prevents key reuse—compromise of one file’s key does not expose others.
 
-## 🔭 Future Work
-
-- 🔁 Vault versioning and file update tracking (track changes to files, support rollback)
-- 🖼 GUI front-end using `egui` or `Tauri` for a cross-platform interface
-- 🗂 Full directory and file metadata support (store size, type, permissions, modified time)
-- 🔑 Pluggable key derivation backends (support Argon2/PBKDF2 in future)
-- ☁️ Optional cloud backup & sync support (e.g. S3 or Dropbox CLI)
-
+### Authenticated Encryption
+- Compress file contents, then encrypt with AES‑256‑GCM.  
+- Store `(ciphertext, nonce, auth_tag)` together as the vault entry.  
+- Any tampering will cause GCM’s integrity check to fail, preventing corrupted data from decrypting.
 
 ---
 
-_Made with 🦀 by arjun7579_
+## 💡 Standalone Huffman Coder
+
+A demonstration of lossless compression lives at `src/custom_compressor.rs`. It illustrates:
+- Building a min‑heap of `(byte, frequency)` nodes  
+- Merging nodes into a binary Huffman tree  
+- Generating prefix codes  
+- Bit‑level encoding and decoding  
+
+> **Note:** This module is not included in the production binary—it’s kept purely for educational purposes.
 
 ---
-Output Screenshots (on command line):
 
-![image](https://github.com/user-attachments/assets/625910f1-a3b2-4792-bbe8-7a73920b7eed)
+## 🦀 Key Dependencies
 
-![image](https://github.com/user-attachments/assets/0e9db14f-7247-4298-b2d6-e27b7e428ef3)
+- **clap** — CLI argument parsing  
+- **serde** & **bincode** — Vault metadata serialization  
+- **argon2**, **aes‑gcm**, **sha2** — Cryptographic primitives  
+- **zstd** & **flate2** — Compression engines  
+- **indicatif** — Progress bars  
+- **tracing** — Structured, human‑readable logging  
+- **zeroize** — Securely wipe secrets from memory  
+---
+## 📄 License
+
+This project is licensed under the MIT License.
+---
+__Made with ❤️ and rust by arjun7579__  
+---
