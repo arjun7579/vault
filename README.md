@@ -170,5 +170,5 @@ A seamless `edit` command that:
 
 ### This project is licensed under the MIT License.
 ---
-##### __Made with ❤️ and rust by arjun7579__  
+##### _Made with ❤️ and rust by arjun7579_  
 ---
