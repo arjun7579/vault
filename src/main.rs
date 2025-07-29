@@ -8,8 +8,8 @@ use std::io;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "vault", author = "arjun7579", version = "1.0")]
-#[command(about = "A secure, production-grade file vault.", long_about = None)]
+#[command(name = "vault",version = env!("CARGO_PKG_VERSION"))]
+#[command(about = "A secure vault.", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

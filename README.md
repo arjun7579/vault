@@ -48,9 +48,19 @@ Vault is a secure, high-performance command-line application written in Rust for
 git clone https://github.com/arjun7579/vault.git
 cd vault
 cargo build --release
-# Binary will be at target/release/vault
+# Binary will be at ./target/release/vault
+```
+After building the project, you can install the `vault` binary to your system's `PATH`. This allows you to run the `vault` command from any directory in your terminal.
+
+```bash
+# Run this command from the root of the project directory
+cargo install --path .
 ```
 
+To verify this, run the following command:
+```bash
+vault --version
+```
 ### Commands
 
 | Command  | Description                                                         |
