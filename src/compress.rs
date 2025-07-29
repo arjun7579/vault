@@ -1,21 +1,18 @@
-// src/compress.rs
 use flate2::read::{ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::io::{Read};
 use zstd::stream::read::{Decoder as ZstdDecoder, Encoder as ZstdEncoder};
 
-// NEW: Enum to represent the different compression algorithms.
-// We derive traits to allow it to be serialized into the vault file.
+//enum to represent the different compression algorithms.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     Deflate, // zlib
     Zstd,
-    // We are removing the custom Huffman coder for now to focus on
-    // production-grade, streaming-compatible libraries.
+    // more compression algo can be added
 }
 
-// NEW: Function that takes a reader and returns a new, compressed reader.
+// function that takes a reader and returns a new, compressed reader.
 pub fn compress_stream<'a, R: Read + 'a>(
     reader: R,
     algorithm: Algorithm,
@@ -26,7 +23,7 @@ pub fn compress_stream<'a, R: Read + 'a>(
     }
 }
 
-// NEW: Function that takes a compressed reader and returns a decompressed reader.
+// function that takes a compressed reader and returns a decompressed reader.
 pub fn decompress_stream<'a, R: Read + 'a>(
     reader: R,
     algorithm: Algorithm,

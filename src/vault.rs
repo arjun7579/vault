@@ -16,10 +16,18 @@ use zeroize::{Zeroize, Zeroizing};
 const VAULT_EXT: &str = "vlt";
 const TEMP_EXT: &str = "tmp";
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct LogEntry {
+    timestamp: String,
+    action: String,
+    filename: String,
+    status: String,
+}
 #[derive(Serialize, Deserialize, Clone)]
 struct Vault {
     password_hash: String,
     files: HashMap<String, VaultEntry>,
+    log: Vec<LogEntry>,
 }
 
 impl Default for Vault {
@@ -27,6 +35,7 @@ impl Default for Vault {
         Self {
             password_hash: String::new(),
             files: HashMap::new(),
+            log: Vec::new(),
         }
     }
 }
@@ -91,10 +100,16 @@ pub fn create_vault(dir: &Path, name: &str) -> io::Result<()> {
     let mut pw = Zeroizing::new(prompt_password("Create vault password: ").unwrap());
     let hash = crypto::hash_master_password(&pw);
     pw.zeroize();
-    let vault = Vault {
-        password_hash: hash,
-        files: HashMap::new(),
-    };
+
+    let mut vault = Vault::default();
+    vault.password_hash = hash;
+    vault.log.push(LogEntry {
+        timestamp: Utc::now().to_rfc3339(),
+        action: "CREATE".to_string(),
+        filename: name.to_string(),
+        status: "Success".to_string(),
+    });
+    
     save_vault(&vault_path, &vault)?;
     info!(path = %vault_path.display(), "Vault created successfully.");
     Ok(())
@@ -156,6 +171,12 @@ pub fn add_file(
             hash,
         },
     );
+    vault.log.push(LogEntry {
+        timestamp: Utc::now().to_rfc3339(),
+        action: "EXTRACT".to_string(),
+        filename: file_name.to_string(),
+        status: "Success".to_string(),
+    });
     save_vault(vault_path, &vault)?;
     info!(file_name, status, "File operation successful.");
     Ok(())
@@ -163,7 +184,7 @@ pub fn add_file(
 
 #[instrument(skip(file_name, vault_path))]
 pub fn extract_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
-    let vault = load_vault(vault_path)?;
+    let mut vault = load_vault(vault_path)?;
     let mut vault_pw = match get_and_verify_vault_password(&vault) {
         Some(p) => p,
         None => return Ok(()),
@@ -199,6 +220,15 @@ pub fn extract_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
     let mut dest_file = File::create(file_name)?;
     io::copy(&mut decompressed_reader, &mut dest_file)?;
     pb.finish_with_message("Decompressed and written to disk.");
+
+    vault.log.push(LogEntry {
+        timestamp: Utc::now().to_rfc3339(),
+        action: "EXTRACT".to_string(),
+        filename: file_name.to_string(),
+        status: "Success".to_string(),
+    });
+    save_vault(vault_path, &vault)?;
+    
     info!(file_name, "File extracted successfully.");
     Ok(())
 }
@@ -239,7 +269,12 @@ pub fn remove_file(file_name: &str, vault_path: &Path) -> io::Result<()> {
     } else {
         error!(file_name, "File was present but could not be removed.");
     }
-
+    vault.log.push(LogEntry {
+        timestamp: Utc::now().to_rfc3339(),
+        action: "REMOVE".to_string(),
+        filename: file_name.to_string(),
+        status: "Success".to_string(),
+    });
     key.zeroize();
     vault_pw.zeroize();
     file_pw.zeroize();
@@ -280,6 +315,12 @@ pub fn remex_file(file_name: &str, vault_path: &Path, out_path: &Path) -> io::Re
     io::copy(&mut decompressed_reader, &mut dest_file)?;
 
     vault.files.remove(file_name);
+    vault.log.push(LogEntry {
+        timestamp: Utc::now().to_rfc3339(),
+        action: "REMEX".to_string(),
+        filename: file_name.to_string(),
+        status: "Success".to_string(),
+    });
     save_vault(vault_path, &vault)?;
     info!(file_name, output_path = %out_path.display(), "File extracted and removed successfully.");
     Ok(())
@@ -292,26 +333,36 @@ pub fn check_vault(vault_path: &Path) -> io::Result<()> {
         Some(p) => p,
         None => return Ok(()),
     };
-    info!("Vault master password OK. Checking file integrity...");
+
+    println!("Vault master password OK.");
     let mut tampered_files = 0;
+
+    let mut dummy_file_pw = Zeroizing::new(String::from("dummy_check_password"));
+
     for (file_name, entry) in &vault.files {
-        let dummy_pw = Zeroizing::new(String::from("integrity-check"));
-        let mut key = Zeroizing::new(crypto::derive_file_key(&vault_pw, &dummy_pw, &entry.created_at));
+        let mut key = Zeroizing::new(crypto::derive_file_key(
+            &vault_pw,
+            &dummy_file_pw,
+            &entry.created_at,
+        ));
+
         if crypto::decrypt(&entry.data, &key, &entry.nonce).is_err() {
-            error!(file_name, "File authentication failed. Possible tampering or corruption.");
+            println!("[FAIL] File '{}' appears to be tampered with or corrupt.", file_name);
             tampered_files += 1;
         } else {
-            info!(file_name, "File integrity verified.");
+            println!("[OK]   File '{}' integrity check passed.", file_name);
         }
         key.zeroize();
     }
+    dummy_file_pw.zeroize();
     vault_pw.zeroize();
 
     if tampered_files == 0 {
-        info!(total_files = vault.files.len(), "Vault integrity check completed. All files are OK.");
+        println!("\nVault integrity check completed. All {} files are OK.", vault.files.len());
     } else {
-        warn!(corrupted_files = tampered_files, "Vault integrity check completed. Found corrupted file(s).");
+        println!("\nVault integrity check completed. Found {} corrupted file(s).", tampered_files);
     }
+
     Ok(())
 }
 
@@ -396,4 +447,29 @@ impl<'a, R: Read> Read for TeeReader<'a, R> {
         }
         Ok(bytes_read)
     }
+}
+
+#[instrument(skip(vault_path))]
+pub fn log_vault(vault_path: &Path) -> io::Result<()> {
+    let vault = load_vault(vault_path)?;
+    if get_and_verify_vault_password(&vault).is_none() {
+        return Ok(());
+    }
+    info!("Displaying vault activity log.");
+    println!("\n--- Activity Log for '{}' ---", vault_path.display());
+    if vault.log.is_empty() {
+        println!("(No activities logged)");
+    } else {
+        for entry in &vault.log {
+            let label = if entry.action == "CREATE" { "Vault" } else { "File" };
+            println!("[{}] - {:<10} | {}: {:<20} | Status: {}",
+                entry.timestamp,
+                entry.action,
+                label,
+                entry.filename,
+                entry.status
+            );
+        }
+    }
+    Ok(())
 }
