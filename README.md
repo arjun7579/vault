@@ -18,7 +18,7 @@ Vault is a secure, high-performance command-line application written in Rust for
 - **Secure Audit Trail**  
   Maintains a persistent, **encrypted** log of all vault operations (add, remove, extract) inside the `.vlt` file itself.  
 - **Portable Vaults**  
-  Self‑contained `.vlt` files include salt and hash internally—no extra setup or permissions needed.
+  Self‑contained `.vlt` files include salt and hash internally-no extra setup or permissions needed.
 
 ### Reliability & Performance
 - **Atomic File Writes**  
