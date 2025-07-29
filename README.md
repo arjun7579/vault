@@ -129,7 +129,7 @@ A demonstration of lossless compression lives at `src/custom_compressor.rs`. It 
 - Generating prefix codes  
 - Bit‑level encoding and decoding  
 
-> **Note:** This module is not included in the production binary—it’s kept in the repo to improve its efficiency and add in future.
+> **Note:** This module is not included in the production binary ; it’s kept in the repo to improve its efficiency and add in future.
 
 ---
 
