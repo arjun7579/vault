@@ -112,7 +112,7 @@ For each file, derive a unique 256‑bit key using SHA‑256 over:
 2. Per‑file password  
 3. File creation timestamp  
 
-This prevents key reuse—compromise of one file’s key does not expose others.
+This prevents key reuse-compromise of one file’s key does not expose others.
 
 ### Authenticated Encryption
 - Compress file contents, then encrypt with AES‑256‑GCM.  
