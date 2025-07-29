@@ -1,7 +1,7 @@
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-/// Initializer for logger
+// Initializer for logger
 pub fn init() {
     let subscriber = FmtSubscriber::builder()
         
