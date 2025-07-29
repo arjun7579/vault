@@ -17,17 +17,16 @@ struct Cli {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum CompressionArg {
-    /// Best for speed: very fast compression and decompression (Default).
+    //zstd is the default
     Zstd,
-    /// Best for size: offers a higher compression ratio, compatible with zip/gzip.
     Deflate,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new vault
+    ///create a new vault
     New { dir: PathBuf, name: String },
-    /// Add a file to a vault
+    /// add a file to a vault
     Add {
         #[arg(short, long)]
         file: PathBuf,
@@ -36,26 +35,26 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = CompressionArg::Zstd)]
         compression: CompressionArg,
     },
-    /// Extract a file from a vault
+    /// extract a file from a vault
     Extract { file: String, vault: PathBuf },
-    /// Remove a file from a vault
+    /// remove a file from a vault
     Rem { file: String, vault: PathBuf },
-    /// Extract and then remove a file
+    /// extract and then remove a file
     Remex {
         file: String,
         vault: PathBuf,
         output: PathBuf,
     },
-    /// Check the integrity of a vault
+    /// check the integrity of a vault
     Check { vault: PathBuf },
-    /// List all files in a vault
+    /// list all files in a vault
     List { vault: PathBuf },
-    /// Permanently delete an entire vault
+    /// permanently delete an entire vault
     Delete {
         #[arg(value_name = "VAULT_PATH")]
         vault: PathBuf,
     },
-    /// Display the activity log for a vault
+    /// display the activity log for a vault
     Log {
         #[arg(value_name = "VAULT_PATH")]
         vault: PathBuf,

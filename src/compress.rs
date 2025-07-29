@@ -9,7 +9,7 @@ use zstd::stream::read::{Decoder as ZstdDecoder, Encoder as ZstdEncoder};
 pub enum Algorithm {
     Deflate, // zlib
     Zstd,
-    // more compression algo can be added
+    // more algo can be added
 }
 
 // function that takes a reader and returns a new, compressed reader.
