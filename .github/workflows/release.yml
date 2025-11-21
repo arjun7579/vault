@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+' # Trigger on version tags like v1.1.4
+
+jobs:
+  create_release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Tag Name
+        id: get_tag
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.TAG }}
+          name: Vault ${{ steps.get_tag.outputs.TAG }}
+          draft: false
+          prerelease: false
+          # The upload_url from this step is used later to attach artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  build_binaries:
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    needs: [create_release]
+    strategy:
+      matrix:
+        # Define targets for cross-compilation
+        target: [x86_64-unknown-linux-musl, x86_64-pc-windows-msvc, x86_64-apple-darwin]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain for Target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          
+      - name: Install Cross-Compilation Tool (for linux-musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install musl-tools
+
+      - name: Build Release Binary
+        run: cargo build --release --target ${{ matrix.target }}
+        
+      - name: Prepare Artifact Name
+        id: prep_artifact
+        run: |
+          # The binary name is 'vault' (from Cargo.toml)
+          # We check the target and set the correct file extension
+          if [[ "${{ matrix.target }}" == "x86_64-pc-windows-msvc" ]]; then
+            echo "FILE_NAME=vault.exe" >> $GITHUB_OUTPUT
+            echo "ARTIFACT_NAME=vault-${{ github.ref_name }}-windows-x64.zip" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.target }}" == "x86_64-apple-darwin" ]]; then
+            echo "FILE_NAME=vault" >> $GITHUB_OUTPUT
+            echo "ARTIFACT_NAME=vault-${{ github.ref_name }}-macos-x64.zip" >> $GITHUB_OUTPUT
+          else
+            echo "FILE_NAME=vault" >> $GITHUB_OUTPUT
+            echo "ARTIFACT_NAME=vault-${{ github.ref_name }}-linux-x64.zip" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Create ZIP Archive
+        run: zip ${{ steps.prep_artifact.outputs.ARTIFACT_NAME }} target/${{ matrix.target }}/release/${{ steps.prep_artifact.outputs.FILE_NAME }}
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release/assets@v2
+        with:
+          files: ${{ steps.prep_artifact.outputs.ARTIFACT_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
