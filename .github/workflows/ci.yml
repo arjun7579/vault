@@ -1,0 +1,39 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+    
+# Use a matrix strategy to test on multiple Rust versions and operating systems
+jobs:
+  check:
+    name: Build, Test, and Lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable, 1.70.0] # Test on a minimum supported version and stable
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      - name: Check Code Formatting (rustfmt)
+        run: cargo fmt --check
+
+      - name: Run Linter (Clippy)
+        run: cargo clippy -- -D warnings # Treat all linter warnings as errors
+
+      - name: Build Project
+        run: cargo build --verbose
+
+      - name: Run Tests
+        run: cargo test --verbose
